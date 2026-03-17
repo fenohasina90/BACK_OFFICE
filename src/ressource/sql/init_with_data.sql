@@ -121,22 +121,6 @@ INSERT INTO client (id, nom, prenom, email) VALUES
 ('C004', 'Durand', 'Sophie', 'sophie.durand@email.com'),
 ('C005', 'Lefebvre', 'Thomas', 'thomas.lefebvre@email.com');
 
--- Hôtels
-INSERT INTO lieu (lieu) VALUES
-('Aeroport'),
-('Paris'),
-('Lyon'),
-('Nice'),
-('Marseille'),
-('Grenoble');
-
-INSERT INTO hotel (nom, adresse, ville, pays, id_lieu) VALUES
-('Hôtel du Parc', '123 Avenue des Champs', 'Paris', 'France', 2),
-('Grand Hôtel de Lyon', '456 Rue Principale', 'Lyon', 'France', 3),
-('Hôtel de la Plage', '789 Boulevard de la Mer', 'Nice', 'France', 4),
-('Palace de Marseille', '321 Vieux Port', 'Marseille', 'France', 5),
-('Hôtel des Alpes', '654 Route de la Montagne', 'Grenoble', 'France', 6);
-
 -- Tokens de test
 INSERT INTO token (reference, date_expiration) VALUES
 ('TOKEN_TEST_2026', '2027-12-31 23:59:59'),
@@ -144,35 +128,15 @@ INSERT INTO token (reference, date_expiration) VALUES
 ('TOKEN_DEV_2026', '2026-12-31 23:59:59');
 
 -- Voitures de test
-INSERT INTO voiture (type_carburant, nb_place) VALUES
-('E', 5),
-('D', 7),
-('El', 4),
-('H', 5),
-('E', 2),
-('D', 9);
 
 -- Paramètres (exemple)
 INSERT INTO parametre (vitesse_moyenne_kmh, temps_attente_min) VALUES
-(45, 10);
+(45, 30);
 
 -- Distances (exemple)
-INSERT INTO distance (from_lieu, to_lieu, distance_km) VALUES
-(1, 2, 12.5),
-(1, 3, 8.2),
-(1, 4, 15.0),
-(1, 5, 11.1),
-(1, 6, 9.7);
+
 
 -- Réservations de test (pour tester la planification)
-INSERT INTO reservation (date_reservation, heure_reservation, nb_personnes, id_client, id_hotel) VALUES
-('2026-03-05', '10:00:00', 2, 'C001', 1),
-('2026-03-05', '11:30:00', 4, 'C002', 2),
-('2026-03-05', '09:15:00', 3, 'C001', 3),
-('2026-03-06', '14:00:00', 1, 'C003', 4),
-('2026-03-05', '10:00:00', 3, 'C003', 2),
-('2026-03-05', '10:00:00', 1, 'C004', 4),
-('2026-03-05', '11:30:00', 2, 'C005', 5);
 
 -- Affichage des données insérées
 SELECT 'Clients insérés:' as info;

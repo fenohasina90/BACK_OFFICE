@@ -144,6 +144,10 @@ public class PlanificationController {
             mv.addObject("voyageId", voyageId);
             mv.addObject("stops", service.getStops(voyageId));
             mv.addObject("distanceTotalKm", service.getVoyageDistanceTotalKm(voyageId));
+
+            PlanificationService.VoyageTiming timing = service.getVoyageTiming(voyageId);
+            mv.addObject("arrivalByStopId", timing.getArrivalAtDestinationByStopId());
+            mv.addObject("arrivalAeroport", timing.getArrivalAtAeroport());
         } catch (Exception e) {
             e.printStackTrace();
             mv.addObject("error", "Erreur lors du chargement du voyage: " + e.getMessage());

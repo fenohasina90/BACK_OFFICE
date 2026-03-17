@@ -125,13 +125,15 @@ public class PlanificationService {
             maxCapacity = Math.max(maxCapacity, v.getNbPlace());
         }
 
-        Map<LocalTime, List<Reservation>> byTime = new LinkedHashMap<>();
+        NavigableMap<LocalTime, List<Reservation>> byTime = new TreeMap<>();
+        int waitMinutes = parametre.getTempsAttenteMin();
         for (Reservation r : reservations) {
             LocalTime t = r.getHeureReservation();
             if (t == null) {
                 t = LocalTime.MIDNIGHT;
             }
-            byTime.computeIfAbsent(t, k -> new ArrayList<>()).add(r);
+            LocalTime windowStart = getWindowStart(t, waitMinutes);
+            byTime.computeIfAbsent(windowStart, k -> new ArrayList<>()).add(r);
         }
 
         Map<Integer, List<Interval>> agenda = new HashMap<>();
@@ -142,9 +144,14 @@ public class PlanificationService {
         List<String> warnings = new ArrayList<>();
         int assignmentsCrees = 0;
 
-        for (Map.Entry<LocalTime, List<Reservation>> entry : byTime.entrySet()) {
+        while (!byTime.isEmpty()) {
+            Map.Entry<LocalTime, List<Reservation>> entry = byTime.pollFirstEntry();
             LocalTime slotTime = entry.getKey();
             List<Reservation> slotReservations = entry.getValue();
+
+            if (slotReservations == null || slotReservations.isEmpty()) {
+                continue;
+            }
 
             slotReservations.sort((a, b) -> Integer.compare(b.getNbPersonnes(), a.getNbPersonnes()));
             List<List<Reservation>> groups = buildGroupsFFD(slotReservations, maxCapacity);
@@ -205,7 +212,20 @@ public class PlanificationService {
                 }
 
                 if (candidates.isEmpty()) {
-                    warnings.add("Aucune voiture disponible pour le slot " + slotTime + " (personnes=" + groupPeople + ")");
+                    if (waitMinutes <= 0) {
+                        warnings.add("Aucune voiture disponible pour le slot " + slotTime + " (personnes=" + groupPeople + ")");
+                        continue;
+                    }
+
+                    LocalTime nextSlot = slotTime.plusMinutes(waitMinutes);
+                    if (nextSlot.equals(slotTime) || nextSlot.isBefore(slotTime)) {
+                        warnings.add("Aucune voiture disponible pour le slot " + slotTime + " (personnes=" + groupPeople + ")");
+                        continue;
+                    }
+
+                    // Attente: reporter ce groupe sur la fenêtre suivante, et le laisser se mutualiser
+                    // avec les réservations déjà prévues dans cette fenêtre.
+                    byTime.computeIfAbsent(nextSlot, k -> new ArrayList<>()).addAll(group);
                     continue;
                 }
 
@@ -234,12 +254,89 @@ public class PlanificationService {
         return new PlanificationResult(date, reservations.size(), clients.size(), assignmentsCrees, warnings);
     }
 
+    private LocalTime getWindowStart(LocalTime time, int windowMinutes) {
+        if (time == null) {
+            return LocalTime.MIDNIGHT;
+        }
+        if (windowMinutes <= 0) {
+            return time;
+        }
+        int minutesOfDay = time.getHour() * 60 + time.getMinute();
+        int windowIndex = minutesOfDay / windowMinutes;
+        int startMinutes = windowIndex * windowMinutes;
+        int hour = startMinutes / 60;
+        int minute = startMinutes % 60;
+        return LocalTime.of(hour % 24, minute);
+    }
+
     public List<Voyage> getVoyages(LocalDate dateDebut, LocalDate dateFin) throws SQLException {
         return voyageService.getVoyagesByDateRange(dateDebut, dateFin);
     }
 
     public List<VoyageStop> getStops(int voyageId) throws SQLException {
         return voyageService.getStopsByVoyage(voyageId);
+    }
+
+    public static class VoyageTiming {
+        private final Map<Integer, LocalTime> arrivalAtDestinationByStopId;
+        private final LocalTime arrivalAtAeroport;
+
+        public VoyageTiming(Map<Integer, LocalTime> arrivalAtDestinationByStopId, LocalTime arrivalAtAeroport) {
+            this.arrivalAtDestinationByStopId = arrivalAtDestinationByStopId;
+            this.arrivalAtAeroport = arrivalAtAeroport;
+        }
+
+        public Map<Integer, LocalTime> getArrivalAtDestinationByStopId() {
+            return arrivalAtDestinationByStopId;
+        }
+
+        public LocalTime getArrivalAtAeroport() {
+            return arrivalAtAeroport;
+        }
+    }
+
+    public VoyageTiming getVoyageTiming(int voyageId) throws SQLException {
+        Voyage voyage = voyageService.getVoyageById(voyageId);
+        if (voyage == null) {
+            throw new SQLException("Voyage introuvable id=" + voyageId);
+        }
+
+        Parametre parametre = parametreService.getParametreActif();
+        int waitMinutes = parametre.getTempsAttenteMin();
+        double vitesseKmh = parametre.getVitesseMoyenneKmh();
+        if (vitesseKmh <= 0) {
+            throw new SQLException("Paramètre vitesse_moyenne_kmh invalide: " + vitesseKmh);
+        }
+
+        int aeroportLieuId = getAeroportLieuId();
+        List<VoyageStop> stops = voyageService.getStopsByVoyage(voyageId);
+
+        LocalDateTime current = LocalDateTime.of(voyage.getDateVoyage(), voyage.getHeureDepart());
+        int currentLieuId = aeroportLieuId;
+
+        Map<Integer, LocalTime> arrivalByStopId = new HashMap<>();
+
+        if (stops != null) {
+            for (VoyageStop s : stops) {
+                double km = distanceService.getDistanceKm(currentLieuId, s.getIdLieuDestination());
+                int minutesTravel = (int) Math.ceil((km / vitesseKmh) * 60.0);
+                current = current.plusMinutes(minutesTravel);
+                arrivalByStopId.put(s.getId(), current.toLocalTime());
+
+                // Temps d'attente sur place (embarquement/débarquement)
+                if (waitMinutes > 0) {
+                    current = current.plusMinutes(waitMinutes);
+                }
+
+                currentLieuId = s.getIdLieuDestination();
+            }
+        }
+
+        double kmBack = distanceService.getDistanceKm(currentLieuId, aeroportLieuId);
+        int minutesBack = (int) Math.ceil((kmBack / vitesseKmh) * 60.0);
+        LocalDateTime arrivalAeroport = current.plusMinutes(minutesBack);
+
+        return new VoyageTiming(arrivalByStopId, arrivalAeroport.toLocalTime());
     }
 
     public double getVoyageDistanceTotalKm(int voyageId) throws SQLException {

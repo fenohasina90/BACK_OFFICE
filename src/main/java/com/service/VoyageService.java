@@ -85,6 +85,33 @@ public class VoyageService {
         return voyages;
     }
 
+    public Voyage getVoyageById(int voyageId) throws SQLException {
+        Connection conn = null;
+        try {
+            conn = DatabaseConnection.getConnection();
+            String sql = "SELECT * FROM voyage WHERE id = ?";
+            PreparedStatement pstmt = conn.prepareStatement(sql);
+            pstmt.setInt(1, voyageId);
+            ResultSet rs = pstmt.executeQuery();
+            Voyage v = null;
+            if (rs.next()) {
+                v = new Voyage(
+                        rs.getInt("id"),
+                        rs.getDate("date_voyage").toLocalDate(),
+                        rs.getTime("heure_depart").toLocalTime(),
+                        rs.getInt("id_voiture"),
+                        rs.getInt("duree_minutes"),
+                        rs.getTimestamp("date_creation")
+                );
+            }
+            rs.close();
+            pstmt.close();
+            return v;
+        } finally {
+            DatabaseConnection.closeConnection(conn);
+        }
+    }
+
     public List<VoyageStop> getStopsByVoyage(int voyageId) throws SQLException {
         List<VoyageStop> stops = new ArrayList<>();
         Connection conn = null;
