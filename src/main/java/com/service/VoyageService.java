@@ -8,7 +8,9 @@ import java.sql.*;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class VoyageService {
 
@@ -33,6 +35,27 @@ public class VoyageService {
                 throw new SQLException("Impossible de créer le voyage");
             }
             return id;
+        } finally {
+            DatabaseConnection.closeConnection(conn);
+        }
+    }
+
+    public Map<Integer, Integer> getVoyageCountsByVoiture(LocalDate dateDebut, LocalDate dateFin) throws SQLException {
+        Map<Integer, Integer> counts = new HashMap<>();
+        Connection conn = null;
+        try {
+            conn = DatabaseConnection.getConnection();
+            String sql = "SELECT id_voiture, COUNT(*) as nb FROM voyage WHERE date_voyage BETWEEN ? AND ? GROUP BY id_voiture";
+            PreparedStatement pstmt = conn.prepareStatement(sql);
+            pstmt.setDate(1, java.sql.Date.valueOf(dateDebut));
+            pstmt.setDate(2, java.sql.Date.valueOf(dateFin));
+            ResultSet rs = pstmt.executeQuery();
+            while (rs.next()) {
+                counts.put(rs.getInt("id_voiture"), rs.getInt("nb"));
+            }
+            rs.close();
+            pstmt.close();
+            return counts;
         } finally {
             DatabaseConnection.closeConnection(conn);
         }
