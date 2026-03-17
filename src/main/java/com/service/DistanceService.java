@@ -9,6 +9,43 @@ import java.util.List;
 
 public class DistanceService {
 
+    public double getDistanceKm(int fromLieuId, int toLieuId) throws SQLException {
+        Connection conn = null;
+        try {
+            conn = DatabaseConnection.getConnection();
+            String sql = "SELECT distance_km FROM distance WHERE from_lieu = ? AND to_lieu = ? LIMIT 1";
+            PreparedStatement pstmt = conn.prepareStatement(sql);
+            pstmt.setInt(1, fromLieuId);
+            pstmt.setInt(2, toLieuId);
+            ResultSet rs = pstmt.executeQuery();
+            Double km = null;
+            if (rs.next()) {
+                km = rs.getDouble("distance_km");
+            }
+            rs.close();
+            pstmt.close();
+
+            if (km == null) {
+                PreparedStatement pstmt2 = conn.prepareStatement(sql);
+                pstmt2.setInt(1, toLieuId);
+                pstmt2.setInt(2, fromLieuId);
+                ResultSet rs2 = pstmt2.executeQuery();
+                if (rs2.next()) {
+                    km = rs2.getDouble("distance_km");
+                }
+                rs2.close();
+                pstmt2.close();
+            }
+
+            if (km == null) {
+                throw new SQLException("Distance introuvable: from_lieu=" + fromLieuId + ", to_lieu=" + toLieuId);
+            }
+            return km;
+        } finally {
+            DatabaseConnection.closeConnection(conn);
+        }
+    }
+
     public List<Distance> getAllDistances() throws SQLException {
         List<Distance> distances = new ArrayList<>();
         Connection conn = null;

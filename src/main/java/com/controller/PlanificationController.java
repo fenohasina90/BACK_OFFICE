@@ -9,6 +9,7 @@ import main.java.com.framework.ModelyAndView;
 import main.java.com.service.PlanificationService;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -36,6 +37,24 @@ public class PlanificationController {
             e.printStackTrace();
             mv.addObject("success", false);
             mv.addObject("error", "Erreur lors de la planification: " + e.getMessage());
+        }
+        return mv;
+    }
+
+    @POSTA("/runV2")
+    public ModelyAndView runV2(@RequestParam("date") String date) {
+        ModelyAndView mv = new ModelyAndView("planification-form");
+        try {
+            LocalDate d = LocalDate.parse(date);
+            PlanificationService.PlanificationResult result = service.planifierV2(d);
+            mv.addObject("success", true);
+            mv.addObject("result", result);
+            mv.addObject("mode", "V2");
+        } catch (Exception e) {
+            e.printStackTrace();
+            mv.addObject("success", false);
+            mv.addObject("error", "Erreur lors de la planification V2: " + e.getMessage());
+            mv.addObject("mode", "V2");
         }
         return mv;
     }
@@ -76,6 +95,59 @@ public class PlanificationController {
         } catch (Exception e) {
             e.printStackTrace();
             mv.addObject("error", "Erreur lors du chargement: " + e.getMessage());
+        }
+        return mv;
+    }
+
+    @GETY("/voyages")
+    public ModelyAndView voyages(@RequestParam("dateDebut") String dateDebut,
+                                 @RequestParam("dateFin") String dateFin) {
+        ModelyAndView mv = new ModelyAndView("planification-voyages");
+        try {
+            LocalDate start;
+            LocalDate end;
+
+            if (dateDebut != null && !dateDebut.trim().isEmpty()) {
+                start = LocalDate.parse(dateDebut);
+            } else {
+                start = LocalDate.now();
+            }
+
+            if (dateFin != null && !dateFin.trim().isEmpty()) {
+                end = LocalDate.parse(dateFin);
+            } else {
+                end = start;
+            }
+
+            if (end.isBefore(start)) {
+                LocalDate tmp = start;
+                start = end;
+                end = tmp;
+            }
+
+            mv.addObject("dateDebut", start);
+            mv.addObject("dateFin", end);
+            mv.addObject("voyages", service.getVoyages(start, end));
+        } catch (Exception e) {
+            e.printStackTrace();
+            mv.addObject("voyages", new ArrayList<>());
+            mv.addObject("error", "Erreur lors du chargement des voyages: " + e.getMessage());
+        }
+        return mv;
+    }
+
+    @GETY("/voyage")
+    public ModelyAndView voyage(@RequestParam("id") String id) {
+        ModelyAndView mv = new ModelyAndView("planification-voyage-detail");
+        try {
+            int voyageId = Integer.parseInt(id);
+            mv.addObject("voyageId", voyageId);
+            mv.addObject("stops", service.getStops(voyageId));
+            mv.addObject("distanceTotalKm", service.getVoyageDistanceTotalKm(voyageId));
+        } catch (Exception e) {
+            e.printStackTrace();
+            mv.addObject("error", "Erreur lors du chargement du voyage: " + e.getMessage());
+            mv.addObject("stops", new ArrayList<>());
         }
         return mv;
     }

@@ -31,7 +31,8 @@
                             </div>
 
                             <div class="form-actions">
-                                <button type="submit" class="btn btn-primary">Planifier</button>
+                                <button type="submit" class="btn btn-primary">Planifier (V1)</button>
+                                <button type="submit" class="btn btn-secondary" formaction="<%= request.getContextPath() %>/planification/runV2">Planifier (V2)</button>
                                 <a href="<%= request.getContextPath() %>/" class="btn btn-secondary">Retour</a>
                             </div>
                         </form>

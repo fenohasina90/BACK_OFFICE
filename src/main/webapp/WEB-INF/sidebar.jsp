@@ -77,6 +77,12 @@
                         <span>Réservations assignées</span>
                     </a>
                 </li>
+                <li class="nav-item">
+                    <a href="/BackOffice/planification/voyages?dateDebut=2026-03-05&dateFin=2026-03-05" class="nav-link">
+                        <span class="nav-icon">🧭</span>
+                        <span>Voyages (V2)</span>
+                    </a>
+                </li>
             </ul>
         </div>
 

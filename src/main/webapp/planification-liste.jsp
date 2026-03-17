@@ -1,6 +1,7 @@
 <%@ page contentType="text/html;charset=UTF-8" language="java" %>
 <%@ page import="java.util.List" %>
 <%@ page import="java.util.Map" %>
+<%@ page import="java.util.HashMap" %>
 <%@ page import="java.sql.Date" %>
 <%@ page import="java.sql.Time" %>
 <%@ page import="java.sql.Timestamp" %>
@@ -69,6 +70,16 @@
                     </div>
                     <div class="card-body">
                         <% if (rows != null && !rows.isEmpty()) { %>
+                            <% 
+                                Map<Integer, Integer> voyageCounts = new HashMap<>();
+                                for (Map<String, Object> r : rows) {
+                                    Integer vid = (Integer) r.get("voyageId");
+                                    if (vid != null) {
+                                        Integer c = voyageCounts.get(vid);
+                                        voyageCounts.put(vid, c == null ? 1 : (c + 1));
+                                    }
+                                }
+                            %>
                             <div class="table-container">
                                 <table class="data-table">
                                     <thead>
@@ -79,6 +90,8 @@
                                             <th>Client</th>
                                             <th>Hôtel</th>
                                             <th>Personnes</th>
+                                            <th>Voyage</th>
+                                            <th>Groupé</th>
                                             <th>Voiture</th>
                                             <th>Carburant</th>
                                             <th>Places</th>
@@ -93,6 +106,8 @@
                                             String idClient = (String) r.get("idClient");
                                             String hotelNom = (String) r.get("hotelNom");
                                             Integer nbPersonnes = (Integer) r.get("nbPersonnes");
+                                            Integer voyageId = (Integer) r.get("voyageId");
+                                            Integer voyageCount = voyageId != null ? voyageCounts.get(voyageId) : null;
                                             Integer voitureId = (Integer) r.get("voitureId");
                                             String typeCarburant = (String) r.get("typeCarburant");
                                             Integer nbPlace = (Integer) r.get("nbPlace");
@@ -113,6 +128,22 @@
                                                 <td><%= idClient %></td>
                                                 <td><%= hotelNom %></td>
                                                 <td><%= nbPersonnes %></td>
+                                                <td>
+                                                    <% if (voyageId != null) { %>
+                                                        <a href="<%= request.getContextPath() %>/planification/voyage?id=<%= voyageId %>"><strong>#<%= voyageId %></strong></a>
+                                                    <% } else { %>
+                                                        -
+                                                    <% } %>
+                                                </td>
+                                                <td>
+                                                    <% if (voyageId != null && voyageCount != null && voyageCount > 1) { %>
+                                                        <span class="badge badge-info">Oui (<%= voyageCount %>)</span>
+                                                    <% } else if (voyageId != null) { %>
+                                                        <span class="badge badge-info">Non</span>
+                                                    <% } else { %>
+                                                        -
+                                                    <% } %>
+                                                </td>
                                                 <td>#<%= voitureId %></td>
                                                 <td><span class="badge <%= badgeClass %>"><%= typeCarburant != null ? typeCarburant : "" %></span></td>
                                                 <td><%= nbPlace %></td>

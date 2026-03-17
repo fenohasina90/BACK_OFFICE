@@ -2,6 +2,8 @@
 -- avec des données de test
 
 -- Création des tables
+DROP TABLE IF EXISTS voyage_stop CASCADE;
+DROP TABLE IF EXISTS voyage CASCADE;
 DROP TABLE IF EXISTS reservation_planification CASCADE;
 DROP TABLE IF EXISTS distance CASCADE;
 DROP TABLE IF EXISTS parametre CASCADE;
@@ -86,6 +88,29 @@ CREATE TABLE reservation_planification (
     FOREIGN KEY (id_voiture) REFERENCES voiture(id)
 );
 
+CREATE TABLE voyage (
+    id serial PRIMARY KEY,
+    date_voyage date NOT NULL,
+    heure_depart time NOT NULL,
+    id_voiture int NOT NULL,
+    duree_minutes int NOT NULL CHECK (duree_minutes >= 0),
+    date_creation timestamp NOT NULL DEFAULT now(),
+    FOREIGN KEY (id_voiture) REFERENCES voiture(id)
+);
+
+CREATE TABLE voyage_stop (
+    id serial PRIMARY KEY,
+    id_voyage int NOT NULL,
+    ordre int NOT NULL CHECK (ordre > 0),
+    id_reservation int NOT NULL,
+    id_lieu_destination int NOT NULL,
+    distance_km double precision NOT NULL CHECK (distance_km >= 0),
+    FOREIGN KEY (id_voyage) REFERENCES voyage(id) ON DELETE CASCADE,
+    FOREIGN KEY (id_reservation) REFERENCES reservation(id) ON DELETE CASCADE,
+    FOREIGN KEY (id_lieu_destination) REFERENCES lieu(id),
+    UNIQUE (id_voyage, ordre)
+);
+
 -- Insertion de données de test
 
 -- Clients
@@ -134,14 +159,20 @@ INSERT INTO parametre (vitesse_moyenne_kmh, temps_attente_min) VALUES
 -- Distances (exemple)
 INSERT INTO distance (from_lieu, to_lieu, distance_km) VALUES
 (1, 2, 12.5),
-(1, 3, 8.2);
+(1, 3, 8.2),
+(1, 4, 15.0),
+(1, 5, 11.1),
+(1, 6, 9.7);
 
 -- Réservations de test (pour tester la planification)
 INSERT INTO reservation (date_reservation, heure_reservation, nb_personnes, id_client, id_hotel) VALUES
 ('2026-03-05', '10:00:00', 2, 'C001', 1),
 ('2026-03-05', '11:30:00', 4, 'C002', 2),
 ('2026-03-05', '09:15:00', 3, 'C001', 3),
-('2026-03-06', '14:00:00', 1, 'C003', 4);
+('2026-03-06', '14:00:00', 1, 'C003', 4),
+('2026-03-05', '10:00:00', 3, 'C003', 2),
+('2026-03-05', '10:00:00', 1, 'C004', 4),
+('2026-03-05', '11:30:00', 2, 'C005', 5);
 
 -- Affichage des données insérées
 SELECT 'Clients insérés:' as info;
