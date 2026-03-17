@@ -1,5 +1,7 @@
 <%@ page contentType="text/html;charset=UTF-8" language="java" %>
 <%@ page import="java.util.List" %>
+<%@ page import="java.util.Map" %>
+<%@ page import="java.time.LocalTime" %>
 <%@ page import="main.java.com.entity.VoyageStop" %>
 <!DOCTYPE html>
 <html>
@@ -24,6 +26,8 @@
                 Object voyageIdObj = request.getAttribute("voyageId");
                 Object distanceTotalKmObj = request.getAttribute("distanceTotalKm");
                 List<VoyageStop> stops = (List<VoyageStop>) request.getAttribute("stops");
+                Map<Integer, LocalTime> arrivalByStopId = (Map<Integer, LocalTime>) request.getAttribute("arrivalByStopId");
+                LocalTime arrivalAeroport = (LocalTime) request.getAttribute("arrivalAeroport");
             %>
 
             <% if (error != null) { %>
@@ -44,6 +48,9 @@
                     <p style="margin-bottom: 1rem;">
                         Distance totale: <strong><%= distanceTotalKmObj != null ? distanceTotalKmObj.toString() : "0" %> km</strong>
                     </p>
+                    <p style="margin-bottom: 1rem;">
+                        Arrivée à l'aéroport: <strong><%= arrivalAeroport != null ? arrivalAeroport.toString() : "" %></strong>
+                    </p>
                     <% if (stops != null && !stops.isEmpty()) { %>
                         <div class="table-container">
                             <table class="data-table">
@@ -53,6 +60,7 @@
                                     <th>Réservation</th>
                                     <th>Lieu destination</th>
                                     <th>Distance (km)</th>
+                                    <th>Heure d'arrivée</th>
                                 </tr>
                                 </thead>
                                 <tbody>
@@ -62,6 +70,7 @@
                                         <td>#<%= s.getIdReservation() %></td>
                                         <td><%= s.getLieuLabel() != null ? s.getLieuLabel() : ("#" + s.getIdLieuDestination()) %></td>
                                         <td><%= s.getDistanceKm() %></td>
+                                        <td><%= (arrivalByStopId != null && arrivalByStopId.get(s.getId()) != null) ? arrivalByStopId.get(s.getId()).toString() : "" %></td>
                                     </tr>
                                 <% } %>
                                 </tbody>
