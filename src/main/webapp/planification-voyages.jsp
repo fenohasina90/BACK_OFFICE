@@ -1,5 +1,6 @@
 <%@ page contentType="text/html;charset=UTF-8" language="java" %>
 <%@ page import="java.util.List" %>
+<%@ page import="java.util.Map" %>
 <%@ page import="main.java.com.entity.Voyage" %>
 <!DOCTYPE html>
 <html>
@@ -24,6 +25,7 @@
                 Object dateDebutObj = request.getAttribute("dateDebut");
                 Object dateFinObj = request.getAttribute("dateFin");
                 List<Voyage> voyages = (List<Voyage>) request.getAttribute("voyages");
+                Map<Integer, Integer> voyageCountsByVoiture = (Map<Integer, Integer>) request.getAttribute("voyageCountsByVoiture");
             %>
 
             <% if (error != null) { %>
@@ -74,6 +76,7 @@
                                     <th>Date</th>
                                     <th>Heure départ</th>
                                     <th>Voiture</th>
+                                    <th>Nb voyages (période)</th>
                                     <th>Durée (min)</th>
                                     <th>Actions</th>
                                 </tr>
@@ -85,6 +88,7 @@
                                         <td><%= v.getDateVoyage() != null ? v.getDateVoyage().toString() : "" %></td>
                                         <td><%= v.getHeureDepart() != null ? v.getHeureDepart().toString().substring(0,5) : "" %></td>
                                         <td>#<%= v.getIdVoiture() %></td>
+                                        <td><%= voyageCountsByVoiture != null ? voyageCountsByVoiture.getOrDefault(v.getIdVoiture(), 0) : 0 %></td>
                                         <td><%= v.getDureeMinutes() %></td>
                                         <td>
                                             <a class="btn btn-secondary" href="<%= request.getContextPath() %>/planification/voyage?id=<%= v.getId() %>">Détails</a>

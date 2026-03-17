@@ -141,6 +141,11 @@ public class PlanificationService {
             agenda.put(v.getId(), new ArrayList<>());
         }
 
+        Map<Integer, Integer> voyageCountByVoitureId = new HashMap<>();
+        for (Voiture v : voitures) {
+            voyageCountByVoitureId.put(v.getId(), 0);
+        }
+
         List<String> warnings = new ArrayList<>();
         int assignmentsCrees = 0;
 
@@ -229,10 +234,12 @@ public class PlanificationService {
                     continue;
                 }
 
-                Voiture chosen = chooseBestVoiture(candidates, groupPeople);
+                Voiture chosen = chooseBestVoitureWithVoyagePriority(candidates, groupPeople, voyageCountByVoitureId);
                 agenda.get(chosen.getId()).add(new Interval(start, end));
 
                 int voyageId = voyageService.createVoyage(date, slotTime, chosen.getId(), minutesTotal);
+
+                voyageCountByVoitureId.put(chosen.getId(), voyageCountByVoitureId.getOrDefault(chosen.getId(), 0) + 1);
 
                 int ordre = 1;
                 for (StopCandidate s : stops) {
@@ -254,6 +261,28 @@ public class PlanificationService {
         return new PlanificationResult(date, reservations.size(), clients.size(), assignmentsCrees, warnings);
     }
 
+    private Voiture chooseBestVoitureWithVoyagePriority(List<Voiture> candidates, int nbPersonnes, Map<Integer, Integer> voyageCountByVoitureId) {
+        if (candidates == null || candidates.isEmpty()) {
+            return null;
+        }
+
+        int minCount = Integer.MAX_VALUE;
+        for (Voiture v : candidates) {
+            int c = voyageCountByVoitureId != null ? voyageCountByVoitureId.getOrDefault(v.getId(), 0) : 0;
+            minCount = Math.min(minCount, c);
+        }
+
+        List<Voiture> leastUsed = new ArrayList<>();
+        for (Voiture v : candidates) {
+            int c = voyageCountByVoitureId != null ? voyageCountByVoitureId.getOrDefault(v.getId(), 0) : 0;
+            if (c == minCount) {
+                leastUsed.add(v);
+            }
+        }
+
+        return chooseBestVoiture(leastUsed, nbPersonnes);
+    }
+
     private LocalTime getWindowStart(LocalTime time, int windowMinutes) {
         if (time == null) {
             return LocalTime.MIDNIGHT;
@@ -271,6 +300,10 @@ public class PlanificationService {
 
     public List<Voyage> getVoyages(LocalDate dateDebut, LocalDate dateFin) throws SQLException {
         return voyageService.getVoyagesByDateRange(dateDebut, dateFin);
+    }
+
+    public Map<Integer, Integer> getVoyageCountsByVoiture(LocalDate dateDebut, LocalDate dateFin) throws SQLException {
+        return voyageService.getVoyageCountsByVoiture(dateDebut, dateFin);
     }
 
     public List<VoyageStop> getStops(int voyageId) throws SQLException {

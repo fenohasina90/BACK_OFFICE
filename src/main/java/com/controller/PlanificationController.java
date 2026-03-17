@@ -128,6 +128,7 @@ public class PlanificationController {
             mv.addObject("dateDebut", start);
             mv.addObject("dateFin", end);
             mv.addObject("voyages", service.getVoyages(start, end));
+            mv.addObject("voyageCountsByVoiture", service.getVoyageCountsByVoiture(start, end));
         } catch (Exception e) {
             e.printStackTrace();
             mv.addObject("voyages", new ArrayList<>());

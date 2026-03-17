@@ -115,11 +115,11 @@ CREATE TABLE voyage_stop (
 
 -- Clients
 INSERT INTO client (id, nom, prenom, email) VALUES
-('C001', 'Dupont', 'Jean', 'jean.dupont@email.com'),
-('C002', 'Martin', 'Marie', 'marie.martin@email.com'),
-('C003', 'Bernard', 'Pierre', 'pierre.bernard@email.com'),
-('C004', 'Durand', 'Sophie', 'sophie.durand@email.com'),
-('C005', 'Lefebvre', 'Thomas', 'thomas.lefebvre@email.com');
+('C006', 'Kot', 'Jean', 'jean.dupont@email.com'),
+('C007', 'Justine', 'Marie', 'marie.martin@email.com'),
+('C008', 'Balita', 'Pierre', 'pierre.bernard@email.com'),
+('C009', 'Randria', 'Sophie', 'sophie.durand@email.com'),
+('C010', 'Bema', 'Thomas', 'thomas.lefebvre@email.com');
 
 -- Tokens de test
 INSERT INTO token (reference, date_expiration) VALUES
