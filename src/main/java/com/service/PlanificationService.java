@@ -103,7 +103,7 @@ public class PlanificationService {
                 if (isReservationDejaPlanifiee(r.getId())) {
                     continue;
                 }
-                createPlanification(r.getId(), chosen.getId());
+                createPlanification(r.getId(), chosen.getId(), null, r.getNbPersonnes());
                 assignmentsCrees++;
             }
         }
@@ -123,6 +123,11 @@ public class PlanificationService {
         int maxCapacity = 0;
         for (Voiture v : voitures) {
             maxCapacity = Math.max(maxCapacity, v.getNbPlace());
+        }
+
+        Map<Integer, Reservation> reservationById = new HashMap<>();
+        for (Reservation r : reservations) {
+            reservationById.put(r.getId(), r);
         }
 
         NavigableMap<LocalTime, List<Reservation>> byTime = new TreeMap<>();
@@ -149,6 +154,8 @@ public class PlanificationService {
         List<String> warnings = new ArrayList<>();
         int assignmentsCrees = 0;
 
+        Deque<Fragment> restesFIFO = new ArrayDeque<>();
+
         while (!byTime.isEmpty()) {
             Map.Entry<LocalTime, List<Reservation>> entry = byTime.pollFirstEntry();
             LocalTime slotTime = entry.getKey();
@@ -158,97 +165,119 @@ public class PlanificationService {
                 continue;
             }
 
-            slotReservations.sort((a, b) -> Integer.compare(b.getNbPersonnes(), a.getNbPersonnes()));
-            List<List<Reservation>> groups = buildGroupsFFD(slotReservations, maxCapacity);
+            for (Reservation r : slotReservations) {
+                if (r.getHotel() == null) {
+                    Reservation full = reservationService.getReservationById(r.getId());
+                    if (full != null) {
+                        r.setHotel(full.getHotel());
+                    }
+                }
+                if (r.getHotel() == null) {
+                    throw new SQLException("Hotel introuvable pour la réservation id=" + r.getId());
+                }
+            }
 
-            for (List<Reservation> group : groups) {
-                int groupPeople = 0;
-                for (Reservation r : group) {
-                    groupPeople += r.getNbPersonnes();
+            List<Fragment> poolNormal = new ArrayList<>();
+            for (Reservation r : slotReservations) {
+                poolNormal.add(Fragment.fromReservation(r, aeroportLieuId, distanceService, lieuService));
+            }
+
+            while (true) {
+                if (poolNormal.isEmpty() && restesFIFO.isEmpty()) {
+                    break;
                 }
 
-                List<StopCandidate> stops = new ArrayList<>();
-                for (Reservation r : group) {
-                    if (r.getHotel() == null) {
-                        r.setHotel(reservationService.getReservationById(r.getId()).getHotel());
+                Integer demandePrioritaire = null;
+                if (!restesFIFO.isEmpty()) {
+                    demandePrioritaire = restesFIFO.peekFirst().nbPersonnesRestantes;
+                } else {
+                    int max = 0;
+                    for (Fragment f : poolNormal) {
+                        max = Math.max(max, f.nbPersonnesRestantes);
                     }
-                    if (r.getHotel() == null) {
-                        throw new SQLException("Hotel introuvable pour la réservation id=" + r.getId());
-                    }
-                    int lieuId = r.getHotel().getIdLieu();
-                    double km = distanceService.getDistanceKm(aeroportLieuId, lieuId);
-                    String lieuLabel = lieuService.getLieuById(lieuId) != null ? lieuService.getLieuById(lieuId).getLieu() : null;
-                    stops.add(new StopCandidate(r.getId(), lieuId, km, lieuLabel));
+                    demandePrioritaire = max;
                 }
 
-                stops.sort((s1, s2) -> {
-                    int c = Double.compare(s1.distanceKm, s2.distanceKm);
+                if (demandePrioritaire == null || demandePrioritaire <= 0) {
+                    break;
+                }
+
+                List<Voiture> deltaCandidates = new ArrayList<>();
+                for (Voiture v : voitures) {
+                    if (v.getNbPlace() >= demandePrioritaire) {
+                        deltaCandidates.add(v);
+                    }
+                }
+
+                if (deltaCandidates.isEmpty()) {
+                    deltaCandidates.addAll(voitures);
+                }
+
+                final int dp = demandePrioritaire;
+
+                deltaCandidates.sort((v1, v2) -> {
+                    int d1 = v1.getNbPlace() - dp;
+                    int d2 = v2.getNbPlace() - dp;
+                    int c;
+                    if (d1 >= 0 && d2 >= 0) {
+                        c = Integer.compare(d1, d2);
+                    } else if (d1 < 0 && d2 < 0) {
+                        c = Integer.compare(Math.abs(d1), Math.abs(d2));
+                    } else {
+                        c = (d1 >= 0) ? -1 : 1;
+                    }
                     if (c != 0) return c;
-                    String l1 = s1.lieuLabel != null ? s1.lieuLabel : "";
-                    String l2 = s2.lieuLabel != null ? s2.lieuLabel : "";
-                    c = l1.compareToIgnoreCase(l2);
+                    int c1 = voyageCountByVoitureId.getOrDefault(v1.getId(), 0);
+                    int c2 = voyageCountByVoitureId.getOrDefault(v2.getId(), 0);
+                    c = Integer.compare(c1, c2);
                     if (c != 0) return c;
-                    return Integer.compare(s1.lieuId, s2.lieuId);
+                    return 0;
                 });
 
-                double kmTotal = 0.0;
-                int currentLieuId = aeroportLieuId;
-                for (StopCandidate s : stops) {
-                    kmTotal += distanceService.getDistanceKm(currentLieuId, s.lieuId);
-                    currentLieuId = s.lieuId;
-                }
-                kmTotal += distanceService.getDistanceKm(currentLieuId, aeroportLieuId);
+                LocalTime departTime = slotTime.plusMinutes(waitMinutes);
+                LocalDateTime start = LocalDateTime.of(date, departTime);
 
-                int minutesTrajet = (int) Math.ceil((kmTotal / parametre.getVitesseMoyenneKmh()) * 60.0);
-                int minutesAttente = parametre.getTempsAttenteMin() * stops.size();
-                int minutesTotal = minutesTrajet + minutesAttente;
-
-                LocalDateTime start = LocalDateTime.of(date, slotTime);
-                LocalDateTime end = start.plusMinutes(minutesTotal);
-
-                List<Voiture> candidates = new ArrayList<>();
-                for (Voiture v : voitures) {
-                    if (v.getNbPlace() < groupPeople) {
-                        continue;
-                    }
-                    if (isAvailable(agenda.get(v.getId()), start, end)) {
-                        candidates.add(v);
+                CandidateVoyage chosenCandidate = null;
+                for (Voiture v : deltaCandidates) {
+                    CandidateVoyage candidate = buildCandidateVoyage(date, slotTime, v, parametre, aeroportLieuId, start, agenda.get(v.getId()), restesFIFO, poolNormal);
+                    if (candidate != null) {
+                        chosenCandidate = candidate;
+                        break;
                     }
                 }
 
-                if (candidates.isEmpty()) {
+                if (chosenCandidate == null) {
                     if (waitMinutes <= 0) {
-                        warnings.add("Aucune voiture disponible pour le slot " + slotTime + " (personnes=" + groupPeople + ")");
-                        continue;
+                        warnings.add("Aucune voiture disponible pour le slot " + slotTime + " (demandePrioritaire=" + demandePrioritaire + ")");
+                        break;
                     }
-
                     LocalTime nextSlot = slotTime.plusMinutes(waitMinutes);
                     if (nextSlot.equals(slotTime) || nextSlot.isBefore(slotTime)) {
-                        warnings.add("Aucune voiture disponible pour le slot " + slotTime + " (personnes=" + groupPeople + ")");
-                        continue;
+                        warnings.add("Aucune voiture disponible pour le slot " + slotTime + " (demandePrioritaire=" + demandePrioritaire + ")");
+                        break;
                     }
 
-                    // Attente: reporter ce groupe sur la fenêtre suivante, et le laisser se mutualiser
-                    // avec les réservations déjà prévues dans cette fenêtre.
-                    byTime.computeIfAbsent(nextSlot, k -> new ArrayList<>()).addAll(group);
-                    continue;
+                    byTime.computeIfAbsent(nextSlot, k -> new ArrayList<>()).addAll(materializeFragmentsAsReservations(reservationById, restesFIFO, poolNormal));
+                    restesFIFO.clear();
+                    poolNormal.clear();
+                    break;
                 }
 
-                Voiture chosen = chooseBestVoitureWithVoyagePriority(candidates, groupPeople, voyageCountByVoitureId);
-                agenda.get(chosen.getId()).add(new Interval(start, end));
+                applyCandidateVoyage(chosenCandidate, restesFIFO, poolNormal);
 
-                int voyageId = voyageService.createVoyage(date, slotTime, chosen.getId(), minutesTotal);
+                agenda.get(chosenCandidate.voiture.getId()).add(new Interval(chosenCandidate.start, chosenCandidate.end));
 
-                voyageCountByVoitureId.put(chosen.getId(), voyageCountByVoitureId.getOrDefault(chosen.getId(), 0) + 1);
+                int voyageId = voyageService.createVoyage(date, departTime, chosenCandidate.voiture.getId(), chosenCandidate.minutesTotal);
+                voyageCountByVoitureId.put(chosenCandidate.voiture.getId(), voyageCountByVoitureId.getOrDefault(chosenCandidate.voiture.getId(), 0) + 1);
 
                 int ordre = 1;
-                for (StopCandidate s : stops) {
+                for (StopForInsert s : chosenCandidate.stopsForInsert) {
                     voyageService.addStop(voyageId, ordre, s.reservationId, s.lieuId, s.distanceKm);
                     ordre++;
                 }
 
-                for (Reservation r : group) {
-                    createPlanification(r.getId(), chosen.getId());
+                for (Assignment a : chosenCandidate.assignments) {
+                    createPlanification(a.reservationId, chosenCandidate.voiture.getId(), voyageId, a.nbPersonnes);
                     assignmentsCrees++;
                 }
             }
@@ -261,133 +290,94 @@ public class PlanificationService {
         return new PlanificationResult(date, reservations.size(), clients.size(), assignmentsCrees, warnings);
     }
 
-    private Voiture chooseBestVoitureWithVoyagePriority(List<Voiture> candidates, int nbPersonnes, Map<Integer, Integer> voyageCountByVoitureId) {
-        if (candidates == null || candidates.isEmpty()) {
-            return null;
-        }
-
-        int minCount = Integer.MAX_VALUE;
-        for (Voiture v : candidates) {
-            int c = voyageCountByVoitureId != null ? voyageCountByVoitureId.getOrDefault(v.getId(), 0) : 0;
-            minCount = Math.min(minCount, c);
-        }
-
-        List<Voiture> leastUsed = new ArrayList<>();
-        for (Voiture v : candidates) {
-            int c = voyageCountByVoitureId != null ? voyageCountByVoitureId.getOrDefault(v.getId(), 0) : 0;
-            if (c == minCount) {
-                leastUsed.add(v);
+    private void createPlanification(int reservationId, int voitureId, Integer voyageId, int nbPersonnesAffectees) throws SQLException {
+        Connection conn = null;
+        try {
+            conn = DatabaseConnection.getConnection();
+            String sql = "INSERT INTO reservation_planification (id_reservation, id_voiture, id_voyage, nb_personnes_affectees) VALUES (?, ?, ?, ?)";
+            PreparedStatement pstmt = conn.prepareStatement(sql);
+            pstmt.setInt(1, reservationId);
+            pstmt.setInt(2, voitureId);
+            if (voyageId == null) {
+                pstmt.setNull(3, Types.INTEGER);
+            } else {
+                pstmt.setInt(3, voyageId);
             }
+            pstmt.setInt(4, nbPersonnesAffectees);
+            pstmt.executeUpdate();
+            pstmt.close();
+        } finally {
+            DatabaseConnection.closeConnection(conn);
         }
-
-        return chooseBestVoiture(leastUsed, nbPersonnes);
     }
 
-    private LocalTime getWindowStart(LocalTime time, int windowMinutes) {
-        if (time == null) {
+    private LocalTime getWindowStart(LocalTime t, int waitMinutes) {
+        if (t == null) {
             return LocalTime.MIDNIGHT;
         }
-        if (windowMinutes <= 0) {
-            return time;
+        if (waitMinutes <= 0) {
+            return t;
         }
-        int minutesOfDay = time.getHour() * 60 + time.getMinute();
-        int windowIndex = minutesOfDay / windowMinutes;
-        int startMinutes = windowIndex * windowMinutes;
-        int hour = startMinutes / 60;
-        int minute = startMinutes % 60;
-        return LocalTime.of(hour % 24, minute);
+        int minutes = t.getHour() * 60 + t.getMinute();
+        int windowStartMinutes = (minutes / waitMinutes) * waitMinutes;
+        int h = windowStartMinutes / 60;
+        int m = windowStartMinutes % 60;
+        return LocalTime.of(h, m);
     }
 
-    public List<Voyage> getVoyages(LocalDate dateDebut, LocalDate dateFin) throws SQLException {
-        return voyageService.getVoyagesByDateRange(dateDebut, dateFin);
-    }
-
-    public Map<Integer, Integer> getVoyageCountsByVoiture(LocalDate dateDebut, LocalDate dateFin) throws SQLException {
-        return voyageService.getVoyageCountsByVoiture(dateDebut, dateFin);
-    }
-
-    public List<VoyageStop> getStops(int voyageId) throws SQLException {
-        return voyageService.getStopsByVoyage(voyageId);
-    }
-
-    public static class VoyageTiming {
-        private final Map<Integer, LocalTime> arrivalAtDestinationByStopId;
-        private final LocalTime arrivalAtAeroport;
-
-        public VoyageTiming(Map<Integer, LocalTime> arrivalAtDestinationByStopId, LocalTime arrivalAtAeroport) {
-            this.arrivalAtDestinationByStopId = arrivalAtDestinationByStopId;
-            this.arrivalAtAeroport = arrivalAtAeroport;
-        }
-
-        public Map<Integer, LocalTime> getArrivalAtDestinationByStopId() {
-            return arrivalAtDestinationByStopId;
-        }
-
-        public LocalTime getArrivalAtAeroport() {
-            return arrivalAtAeroport;
+    private int getAeroportLieuId() throws SQLException {
+        Connection conn = null;
+        try {
+            conn = DatabaseConnection.getConnection();
+            String sql = "SELECT id FROM lieu WHERE lower(lieu) = 'aeroport' LIMIT 1";
+            Statement stmt = conn.createStatement();
+            ResultSet rs = stmt.executeQuery(sql);
+            Integer id = null;
+            if (rs.next()) {
+                id = rs.getInt("id");
+            }
+            rs.close();
+            stmt.close();
+            if (id == null) {
+                throw new SQLException("Lieu 'Aeroport' introuvable");
+            }
+            return id;
+        } finally {
+            DatabaseConnection.closeConnection(conn);
         }
     }
 
-    public VoyageTiming getVoyageTiming(int voyageId) throws SQLException {
-        Voyage voyage = voyageService.getVoyageById(voyageId);
-        if (voyage == null) {
-            throw new SQLException("Voyage introuvable id=" + voyageId);
+    private static class Interval {
+        private final LocalDateTime start;
+        private final LocalDateTime end;
+
+        private Interval(LocalDateTime start, LocalDateTime end) {
+            this.start = start;
+            this.end = end;
         }
+    }
 
-        Parametre parametre = parametreService.getParametreActif();
-        int waitMinutes = parametre.getTempsAttenteMin();
-        double vitesseKmh = parametre.getVitesseMoyenneKmh();
-        if (vitesseKmh <= 0) {
-            throw new SQLException("Paramètre vitesse_moyenne_kmh invalide: " + vitesseKmh);
-        }
-
-        int aeroportLieuId = getAeroportLieuId();
-        List<VoyageStop> stops = voyageService.getStopsByVoyage(voyageId);
-
-        LocalDateTime current = LocalDateTime.of(voyage.getDateVoyage(), voyage.getHeureDepart());
-        int currentLieuId = aeroportLieuId;
-
-        Map<Integer, LocalTime> arrivalByStopId = new HashMap<>();
-
-        if (stops != null) {
-            for (VoyageStop s : stops) {
-                double km = distanceService.getDistanceKm(currentLieuId, s.getIdLieuDestination());
-                int minutesTravel = (int) Math.ceil((km / vitesseKmh) * 60.0);
-                current = current.plusMinutes(minutesTravel);
-                arrivalByStopId.put(s.getId(), current.toLocalTime());
-
-                // Temps d'attente sur place (embarquement/débarquement)
-                if (waitMinutes > 0) {
-                    current = current.plusMinutes(waitMinutes);
-                }
-
-                currentLieuId = s.getIdLieuDestination();
+    private boolean isAvailable(List<Interval> intervals, LocalDateTime start, LocalDateTime end) {
+        for (Interval i : intervals) {
+            if (start.isBefore(i.end) && end.isAfter(i.start)) {
+                return false;
             }
         }
-
-        double kmBack = distanceService.getDistanceKm(currentLieuId, aeroportLieuId);
-        int minutesBack = (int) Math.ceil((kmBack / vitesseKmh) * 60.0);
-        LocalDateTime arrivalAeroport = current.plusMinutes(minutesBack);
-
-        return new VoyageTiming(arrivalByStopId, arrivalAeroport.toLocalTime());
+        return true;
     }
 
-    public double getVoyageDistanceTotalKm(int voyageId) throws SQLException {
-        int aeroportLieuId = getAeroportLieuId();
-        List<VoyageStop> stops = voyageService.getStopsByVoyage(voyageId);
+    private static class StopCandidate {
+        private final int reservationId;
+        private final int lieuId;
+        private final double distanceKm;
+        private final String lieuLabel;
 
-        if (stops == null || stops.isEmpty()) {
-            return 0.0;
+        private StopCandidate(int reservationId, int lieuId, double distanceKm, String lieuLabel) {
+            this.reservationId = reservationId;
+            this.lieuId = lieuId;
+            this.distanceKm = distanceKm;
+            this.lieuLabel = lieuLabel;
         }
-
-        double kmTotal = 0.0;
-        int currentLieuId = aeroportLieuId;
-        for (VoyageStop s : stops) {
-            kmTotal += distanceService.getDistanceKm(currentLieuId, s.getIdLieuDestination());
-            currentLieuId = s.getIdLieuDestination();
-        }
-        kmTotal += distanceService.getDistanceKm(currentLieuId, aeroportLieuId);
-        return kmTotal;
     }
 
     private Voiture chooseBestVoiture(List<Voiture> candidates, int nbPersonnes) {
@@ -468,19 +458,234 @@ public class PlanificationService {
         }
     }
 
-    private void createPlanification(int reservationId, int voitureId) throws SQLException {
-        Connection conn = null;
-        try {
-            conn = DatabaseConnection.getConnection();
-            String sql = "INSERT INTO reservation_planification (id_reservation, id_voiture) VALUES (?, ?)";
-            PreparedStatement pstmt = conn.prepareStatement(sql);
-            pstmt.setInt(1, reservationId);
-            pstmt.setInt(2, voitureId);
-            pstmt.executeUpdate();
-            pstmt.close();
-        } finally {
-            DatabaseConnection.closeConnection(conn);
+    public List<Voyage> getVoyages(LocalDate dateDebut, LocalDate dateFin) throws SQLException {
+        return voyageService.getVoyagesByDateRange(dateDebut, dateFin);
+    }
+
+    public Map<Integer, Integer> getVoyageCountsByVoiture(LocalDate dateDebut, LocalDate dateFin) throws SQLException {
+        return voyageService.getVoyageCountsByVoiture(dateDebut, dateFin);
+    }
+
+    public List<VoyageStop> getStops(int voyageId) throws SQLException {
+        return voyageService.getStopsByVoyage(voyageId);
+    }
+
+    public Voyage getVoyageById(int voyageId) throws SQLException {
+        return voyageService.getVoyageById(voyageId);
+    }
+
+    public static class VoyageTiming {
+        private final Map<Integer, LocalTime> arrivalAtDestinationByStopId;
+        private final LocalTime arrivalAtAeroport;
+
+        public VoyageTiming(Map<Integer, LocalTime> arrivalAtDestinationByStopId, LocalTime arrivalAtAeroport) {
+            this.arrivalAtDestinationByStopId = arrivalAtDestinationByStopId;
+            this.arrivalAtAeroport = arrivalAtAeroport;
         }
+
+        public Map<Integer, LocalTime> getArrivalAtDestinationByStopId() {
+            return arrivalAtDestinationByStopId;
+        }
+
+        public LocalTime getArrivalAtAeroport() {
+            return arrivalAtAeroport;
+        }
+    }
+
+    public VoyageTiming getVoyageTiming(int voyageId) throws SQLException {
+        Voyage voyage = voyageService.getVoyageById(voyageId);
+        if (voyage == null) {
+            throw new SQLException("Voyage introuvable id=" + voyageId);
+        }
+
+        Parametre parametre = parametreService.getParametreActif();
+        int waitMinutes = parametre.getTempsAttenteMin();
+        double vitesseKmh = parametre.getVitesseMoyenneKmh();
+        if (vitesseKmh <= 0) {
+            throw new SQLException("Paramètre vitesse_moyenne_kmh invalide: " + vitesseKmh);
+        }
+
+        int aeroportLieuId = getAeroportLieuId();
+        List<VoyageStop> stops = voyageService.getStopsByVoyage(voyageId);
+
+        LocalDateTime current = LocalDateTime.of(voyage.getDateVoyage(), voyage.getHeureDepart());
+        int currentLieuId = aeroportLieuId;
+
+        Map<Integer, LocalTime> arrivalByStopId = new HashMap<>();
+
+        if (stops != null) {
+            for (VoyageStop s : stops) {
+                double km = distanceService.getDistanceKm(currentLieuId, s.getIdLieuDestination());
+                int minutesTravel = (int) Math.ceil((km / vitesseKmh) * 60.0);
+                current = current.plusMinutes(minutesTravel);
+                arrivalByStopId.put(s.getId(), current.toLocalTime());
+
+                currentLieuId = s.getIdLieuDestination();
+            }
+        }
+
+        double kmBack = distanceService.getDistanceKm(currentLieuId, aeroportLieuId);
+        int minutesBack = (int) Math.ceil((kmBack / vitesseKmh) * 60.0);
+        LocalDateTime arrivalAeroport = current.plusMinutes(minutesBack);
+
+        return new VoyageTiming(arrivalByStopId, arrivalAeroport.toLocalTime());
+    }
+
+    public static class VoyageTimingDateTime {
+        private final Map<Integer, LocalDateTime> arrivalAtDestinationByStopId;
+        private final LocalDateTime arrivalAtAeroport;
+
+        public VoyageTimingDateTime(Map<Integer, LocalDateTime> arrivalAtDestinationByStopId, LocalDateTime arrivalAtAeroport) {
+            this.arrivalAtDestinationByStopId = arrivalAtDestinationByStopId;
+            this.arrivalAtAeroport = arrivalAtAeroport;
+        }
+
+        public Map<Integer, LocalDateTime> getArrivalAtDestinationByStopId() {
+            return arrivalAtDestinationByStopId;
+        }
+
+        public LocalDateTime getArrivalAtAeroport() {
+            return arrivalAtAeroport;
+        }
+    }
+
+    public VoyageTimingDateTime getVoyageTimingDateTime(int voyageId) throws SQLException {
+        Voyage voyage = voyageService.getVoyageById(voyageId);
+        if (voyage == null) {
+            throw new SQLException("Voyage introuvable id=" + voyageId);
+        }
+
+        Parametre parametre = parametreService.getParametreActif();
+        int waitMinutes = parametre.getTempsAttenteMin();
+        double vitesseKmh = parametre.getVitesseMoyenneKmh();
+        if (vitesseKmh <= 0) {
+            throw new SQLException("Paramètre vitesse_moyenne_kmh invalide: " + vitesseKmh);
+        }
+
+        int aeroportLieuId = getAeroportLieuId();
+        List<VoyageStop> stops = voyageService.getStopsByVoyage(voyageId);
+
+        LocalDateTime current = LocalDateTime.of(voyage.getDateVoyage(), voyage.getHeureDepart());
+        int currentLieuId = aeroportLieuId;
+
+        Map<Integer, LocalDateTime> arrivalByStopId = new HashMap<>();
+
+        if (stops != null) {
+            for (VoyageStop s : stops) {
+                double km = distanceService.getDistanceKm(currentLieuId, s.getIdLieuDestination());
+                int minutesTravel = (int) Math.ceil((km / vitesseKmh) * 60.0);
+                current = current.plusMinutes(minutesTravel);
+                arrivalByStopId.put(s.getId(), current);
+
+                currentLieuId = s.getIdLieuDestination();
+            }
+        }
+
+        double kmBack = distanceService.getDistanceKm(currentLieuId, aeroportLieuId);
+        int minutesBack = (int) Math.ceil((kmBack / vitesseKmh) * 60.0);
+        LocalDateTime arrivalAeroport = current.plusMinutes(minutesBack);
+
+        return new VoyageTimingDateTime(arrivalByStopId, arrivalAeroport);
+    }
+
+    public static class VoyageLeg {
+        private final String fromLabel;
+        private final String toLabel;
+        private final double distanceKm;
+        private final LocalDateTime depart;
+        private final LocalDateTime arrive;
+
+        public VoyageLeg(String fromLabel, String toLabel, double distanceKm, LocalDateTime depart, LocalDateTime arrive) {
+            this.fromLabel = fromLabel;
+            this.toLabel = toLabel;
+            this.distanceKm = distanceKm;
+            this.depart = depart;
+            this.arrive = arrive;
+        }
+
+        public String getFromLabel() {
+            return fromLabel;
+        }
+
+        public String getToLabel() {
+            return toLabel;
+        }
+
+        public double getDistanceKm() {
+            return distanceKm;
+        }
+
+        public LocalDateTime getDepart() {
+            return depart;
+        }
+
+        public LocalDateTime getArrive() {
+            return arrive;
+        }
+    }
+
+    public List<VoyageLeg> getVoyageLegs(int voyageId) throws SQLException {
+        Voyage voyage = voyageService.getVoyageById(voyageId);
+        if (voyage == null) {
+            throw new SQLException("Voyage introuvable id=" + voyageId);
+        }
+
+        Parametre parametre = parametreService.getParametreActif();
+        int waitMinutes = parametre.getTempsAttenteMin();
+        double vitesseKmh = parametre.getVitesseMoyenneKmh();
+        if (vitesseKmh <= 0) {
+            throw new SQLException("Paramètre vitesse_moyenne_kmh invalide: " + vitesseKmh);
+        }
+
+        int aeroportLieuId = getAeroportLieuId();
+        List<VoyageStop> stops = voyageService.getStopsByVoyage(voyageId);
+
+        List<VoyageLeg> legs = new ArrayList<>();
+
+        LocalDateTime current = LocalDateTime.of(voyage.getDateVoyage(), voyage.getHeureDepart());
+        int currentLieuId = aeroportLieuId;
+        String currentLabel = "Aeroport";
+
+        if (stops != null) {
+            for (VoyageStop s : stops) {
+                String destLabel = s.getLieuLabel() != null ? s.getLieuLabel() : ("#" + s.getIdLieuDestination());
+                double km = distanceService.getDistanceKm(currentLieuId, s.getIdLieuDestination());
+                int minutesTravel = (int) Math.ceil((km / vitesseKmh) * 60.0);
+                LocalDateTime depart = current;
+                LocalDateTime arrive = current.plusMinutes(minutesTravel);
+                legs.add(new VoyageLeg(currentLabel, destLabel, km, depart, arrive));
+
+                current = arrive;
+                currentLieuId = s.getIdLieuDestination();
+                currentLabel = destLabel;
+            }
+        }
+
+        double kmBack = distanceService.getDistanceKm(currentLieuId, aeroportLieuId);
+        int minutesBack = (int) Math.ceil((kmBack / vitesseKmh) * 60.0);
+        LocalDateTime departBack = current;
+        LocalDateTime arriveBack = current.plusMinutes(minutesBack);
+        legs.add(new VoyageLeg(currentLabel, "Aeroport", kmBack, departBack, arriveBack));
+
+        return legs;
+    }
+
+    public double getVoyageDistanceTotalKm(int voyageId) throws SQLException {
+        int aeroportLieuId = getAeroportLieuId();
+        List<VoyageStop> stops = voyageService.getStopsByVoyage(voyageId);
+
+        if (stops == null || stops.isEmpty()) {
+            return 0.0;
+        }
+
+        double kmTotal = 0.0;
+        int currentLieuId = aeroportLieuId;
+        for (VoyageStop s : stops) {
+            kmTotal += distanceService.getDistanceKm(currentLieuId, s.getIdLieuDestination());
+            currentLieuId = s.getIdLieuDestination();
+        }
+        kmTotal += distanceService.getDistanceKm(currentLieuId, aeroportLieuId);
+        return kmTotal;
     }
 
     private void clearPlanificationForDate(LocalDate date) throws SQLException {
@@ -527,92 +732,6 @@ public class PlanificationService {
         }
     }
 
-    private int getAeroportLieuId() throws SQLException {
-        Connection conn = null;
-        try {
-            conn = DatabaseConnection.getConnection();
-            String sql = "SELECT id FROM lieu WHERE lower(lieu) = 'aeroport' LIMIT 1";
-            Statement stmt = conn.createStatement();
-            ResultSet rs = stmt.executeQuery(sql);
-            Integer id = null;
-            if (rs.next()) {
-                id = rs.getInt("id");
-            }
-            rs.close();
-            stmt.close();
-            if (id == null) {
-                throw new SQLException("Lieu 'Aeroport' introuvable");
-            }
-            return id;
-        } finally {
-            DatabaseConnection.closeConnection(conn);
-        }
-    }
-
-    private static class Interval {
-        private final LocalDateTime start;
-        private final LocalDateTime end;
-
-        private Interval(LocalDateTime start, LocalDateTime end) {
-            this.start = start;
-            this.end = end;
-        }
-    }
-
-    private boolean isAvailable(List<Interval> intervals, LocalDateTime start, LocalDateTime end) {
-        for (Interval i : intervals) {
-            if (start.isBefore(i.end) && end.isAfter(i.start)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private List<List<Reservation>> buildGroupsFFD(List<Reservation> sortedByPeopleDesc, int maxCapacity) {
-        List<List<Reservation>> groups = new ArrayList<>();
-        List<Integer> sums = new ArrayList<>();
-        for (Reservation r : sortedByPeopleDesc) {
-            if (r.getNbPersonnes() > maxCapacity) {
-                List<Reservation> g = new ArrayList<>();
-                g.add(r);
-                groups.add(g);
-                sums.add(r.getNbPersonnes());
-                continue;
-            }
-            boolean placed = false;
-            for (int i = 0; i < groups.size(); i++) {
-                int current = sums.get(i);
-                if (current + r.getNbPersonnes() <= maxCapacity) {
-                    groups.get(i).add(r);
-                    sums.set(i, current + r.getNbPersonnes());
-                    placed = true;
-                    break;
-                }
-            }
-            if (!placed) {
-                List<Reservation> g = new ArrayList<>();
-                g.add(r);
-                groups.add(g);
-                sums.add(r.getNbPersonnes());
-            }
-        }
-        return groups;
-    }
-
-    private static class StopCandidate {
-        private final int reservationId;
-        private final int lieuId;
-        private final double distanceKm;
-        private final String lieuLabel;
-
-        private StopCandidate(int reservationId, int lieuId, double distanceKm, String lieuLabel) {
-            this.reservationId = reservationId;
-            this.lieuId = lieuId;
-            this.distanceKm = distanceKm;
-            this.lieuLabel = lieuLabel;
-        }
-    }
-
     public List<Map<String, Object>> getReservationsPlanifiees(LocalDate date) throws SQLException {
         return getReservationsPlanifiees(date, date);
     }
@@ -624,12 +743,11 @@ public class PlanificationService {
             conn = DatabaseConnection.getConnection();
             String sql = "SELECT r.id as reservation_id, r.date_reservation, r.heure_reservation, r.nb_personnes, r.id_client, " +
                     "h.nom as hotel_nom, rp.date_planification, v.id as voiture_id, v.type_carburant, v.nb_place, " +
-                    "vs.id_voyage as voyage_id " +
+                    "rp.id_voyage as voyage_id, rp.nb_personnes_affectees " +
                     "FROM reservation_planification rp " +
                     "JOIN reservation r ON rp.id_reservation = r.id " +
                     "JOIN hotel h ON r.id_hotel = h.id " +
                     "JOIN voiture v ON rp.id_voiture = v.id " +
-                    "LEFT JOIN voyage_stop vs ON vs.id_reservation = r.id " +
                     "WHERE r.date_reservation BETWEEN ? AND ? " +
                     "ORDER BY r.date_reservation ASC, rp.date_planification DESC, r.id ASC";
             PreparedStatement pstmt = conn.prepareStatement(sql);
@@ -650,6 +768,7 @@ public class PlanificationService {
                 row.put("nbPlace", rs.getInt("nb_place"));
                 Object voyageId = rs.getObject("voyage_id");
                 row.put("voyageId", voyageId != null ? ((Number) voyageId).intValue() : null);
+                row.put("nbPersonnesAffectees", rs.getInt("nb_personnes_affectees"));
                 rows.add(row);
             }
             rs.close();
@@ -658,5 +777,245 @@ public class PlanificationService {
             DatabaseConnection.closeConnection(conn);
         }
         return rows;
+    }
+
+    public List<Reservation> getReservationsByDate(LocalDate date) throws SQLException {
+        return reservationService.getReservationsByDate(date);
+    }
+
+    public Parametre getParametreActif() throws SQLException {
+        return parametreService.getParametreActif();
+    }
+
+    public LocalTime getCreneauStart(LocalTime reservationTime) throws SQLException {
+        Parametre parametre = parametreService.getParametreActif();
+        int waitMinutes = parametre.getTempsAttenteMin();
+        LocalTime t = reservationTime;
+        if (t == null) {
+            t = LocalTime.MIDNIGHT;
+        }
+        return getWindowStart(t, waitMinutes);
+    }
+
+    private static class Fragment {
+        private final int reservationId;
+        private final int lieuId;
+        private final double distanceKmFromAeroport;
+        private final String lieuLabel;
+        private int nbPersonnesRestantes;
+
+        private Fragment(int reservationId, int lieuId, double distanceKmFromAeroport, String lieuLabel, int nbPersonnesRestantes) {
+            this.reservationId = reservationId;
+            this.lieuId = lieuId;
+            this.distanceKmFromAeroport = distanceKmFromAeroport;
+            this.lieuLabel = lieuLabel;
+            this.nbPersonnesRestantes = nbPersonnesRestantes;
+        }
+
+        private static Fragment fromReservation(Reservation r, int aeroportLieuId, DistanceService distanceService, LieuService lieuService) throws SQLException {
+            int lieuId = r.getHotel().getIdLieu();
+            double km = distanceService.getDistanceKm(aeroportLieuId, lieuId);
+            String label = lieuService.getLieuById(lieuId) != null ? lieuService.getLieuById(lieuId).getLieu() : null;
+            return new Fragment(r.getId(), lieuId, km, label, r.getNbPersonnes());
+        }
+    }
+
+    private static class Assignment {
+        private final int reservationId;
+        private final int nbPersonnes;
+
+        private Assignment(int reservationId, int nbPersonnes) {
+            this.reservationId = reservationId;
+            this.nbPersonnes = nbPersonnes;
+        }
+    }
+
+    private static class StopForInsert {
+        private final int reservationId;
+        private final int lieuId;
+        private final double distanceKm;
+
+        private StopForInsert(int reservationId, int lieuId, double distanceKm) {
+            this.reservationId = reservationId;
+            this.lieuId = lieuId;
+            this.distanceKm = distanceKm;
+        }
+    }
+
+    private static class CandidateVoyage {
+        private final Voiture voiture;
+        private final LocalDateTime start;
+        private final LocalDateTime end;
+        private final int minutesTotal;
+        private final List<Assignment> assignments;
+        private final List<StopForInsert> stopsForInsert;
+        private final Deque<Fragment> restesAfter;
+        private final List<Fragment> poolAfter;
+
+        private CandidateVoyage(Voiture voiture, LocalDateTime start, LocalDateTime end, int minutesTotal, List<Assignment> assignments, List<StopForInsert> stopsForInsert, Deque<Fragment> restesAfter, List<Fragment> poolAfter) {
+            this.voiture = voiture;
+            this.start = start;
+            this.end = end;
+            this.minutesTotal = minutesTotal;
+            this.assignments = assignments;
+            this.stopsForInsert = stopsForInsert;
+            this.restesAfter = restesAfter;
+            this.poolAfter = poolAfter;
+        }
+    }
+
+    private CandidateVoyage buildCandidateVoyage(LocalDate date, LocalTime slotTime, Voiture v, Parametre parametre, int aeroportLieuId, LocalDateTime start, List<Interval> intervals, Deque<Fragment> restesFIFO, List<Fragment> poolNormal) throws SQLException {
+        int remainingSeats = v.getNbPlace();
+
+        Deque<Fragment> restesCopy = new ArrayDeque<>();
+        for (Fragment f : restesFIFO) {
+            restesCopy.addLast(new Fragment(f.reservationId, f.lieuId, f.distanceKmFromAeroport, f.lieuLabel, f.nbPersonnesRestantes));
+        }
+        List<Fragment> poolCopy = new ArrayList<>();
+        for (Fragment f : poolNormal) {
+            poolCopy.add(new Fragment(f.reservationId, f.lieuId, f.distanceKmFromAeroport, f.lieuLabel, f.nbPersonnesRestantes));
+        }
+
+        List<Assignment> assignments = new ArrayList<>();
+
+        while (remainingSeats > 0 && !restesCopy.isEmpty()) {
+            Fragment f = restesCopy.peekFirst();
+            int take = Math.min(f.nbPersonnesRestantes, remainingSeats);
+            assignments.add(new Assignment(f.reservationId, take));
+            f.nbPersonnesRestantes -= take;
+            remainingSeats -= take;
+            if (f.nbPersonnesRestantes == 0) {
+                restesCopy.removeFirst();
+            }
+        }
+
+        poolCopy.sort((a, b) -> Integer.compare(b.nbPersonnesRestantes, a.nbPersonnesRestantes));
+        List<Fragment> poolRemaining = new ArrayList<>();
+        for (Fragment f : poolCopy) {
+            if (remainingSeats <= 0) {
+                poolRemaining.add(f);
+                continue;
+            }
+            int take = Math.min(f.nbPersonnesRestantes, remainingSeats);
+            assignments.add(new Assignment(f.reservationId, take));
+            f.nbPersonnesRestantes -= take;
+            remainingSeats -= take;
+            if (f.nbPersonnesRestantes > 0) {
+                restesCopy.addLast(f);
+            }
+        }
+
+        if (assignments.isEmpty()) {
+            return null;
+        }
+
+        Map<Integer, Fragment> fragmentByReservation = new HashMap<>();
+        for (Fragment f : restesCopy) {
+            fragmentByReservation.putIfAbsent(f.reservationId, f);
+        }
+        for (Fragment f : poolCopy) {
+            fragmentByReservation.putIfAbsent(f.reservationId, f);
+        }
+        for (Fragment f : poolNormal) {
+            fragmentByReservation.putIfAbsent(f.reservationId, f);
+        }
+        for (Fragment f : restesFIFO) {
+            fragmentByReservation.putIfAbsent(f.reservationId, f);
+        }
+
+        List<StopCandidate> stopCandidates = new ArrayList<>();
+        for (Assignment a : assignments) {
+            Fragment f = fragmentByReservation.get(a.reservationId);
+            if (f == null) {
+                continue;
+            }
+            stopCandidates.add(new StopCandidate(a.reservationId, f.lieuId, f.distanceKmFromAeroport, f.lieuLabel));
+        }
+
+        stopCandidates.sort((s1, s2) -> {
+            int c = Double.compare(s1.distanceKm, s2.distanceKm);
+            if (c != 0) return c;
+            String l1 = s1.lieuLabel != null ? s1.lieuLabel : "";
+            String l2 = s2.lieuLabel != null ? s2.lieuLabel : "";
+            c = l1.compareToIgnoreCase(l2);
+            if (c != 0) return c;
+            return Integer.compare(s1.lieuId, s2.lieuId);
+        });
+
+        List<Integer> distinctLieuPath = new ArrayList<>();
+        for (StopCandidate s : stopCandidates) {
+            if (distinctLieuPath.isEmpty() || distinctLieuPath.get(distinctLieuPath.size() - 1) != s.lieuId) {
+                distinctLieuPath.add(s.lieuId);
+            }
+        }
+
+        double kmTotal = 0.0;
+        int currentLieuId = aeroportLieuId;
+        for (Integer lieuId : distinctLieuPath) {
+            kmTotal += distanceService.getDistanceKm(currentLieuId, lieuId);
+            currentLieuId = lieuId;
+        }
+        kmTotal += distanceService.getDistanceKm(currentLieuId, aeroportLieuId);
+
+        int minutesTrajet = (int) Math.ceil((kmTotal / parametre.getVitesseMoyenneKmh()) * 60.0);
+        int minutesTotal = minutesTrajet;
+
+        LocalDateTime end = start.plusMinutes(minutesTotal);
+        if (!isAvailable(intervals, start, end)) {
+            return null;
+        }
+
+        List<StopForInsert> stopsForInsert = new ArrayList<>();
+        int prevLieu = aeroportLieuId;
+        Set<Integer> visited = new HashSet<>();
+        for (StopCandidate s : stopCandidates) {
+            double km;
+            if (visited.contains(s.lieuId)) {
+                km = 0.0;
+            } else {
+                km = distanceService.getDistanceKm(prevLieu, s.lieuId);
+                prevLieu = s.lieuId;
+                visited.add(s.lieuId);
+            }
+            stopsForInsert.add(new StopForInsert(s.reservationId, s.lieuId, km));
+        }
+
+        return new CandidateVoyage(v, start, end, minutesTotal, assignments, stopsForInsert, restesCopy, poolRemaining);
+    }
+
+    private void applyCandidateVoyage(CandidateVoyage candidate, Deque<Fragment> restesFIFO, List<Fragment> poolNormal) {
+        restesFIFO.clear();
+        restesFIFO.addAll(candidate.restesAfter);
+        poolNormal.clear();
+        poolNormal.addAll(candidate.poolAfter);
+    }
+
+    private List<Reservation> materializeFragmentsAsReservations(Map<Integer, Reservation> reservationById, Deque<Fragment> restesFIFO, List<Fragment> poolNormal) {
+        List<Reservation> out = new ArrayList<>();
+        Map<Integer, Integer> remainingByReservationId = new LinkedHashMap<>();
+        for (Fragment f : restesFIFO) {
+            if (f.nbPersonnesRestantes > 0) {
+                remainingByReservationId.put(f.reservationId, f.nbPersonnesRestantes);
+            }
+        }
+        for (Fragment f : poolNormal) {
+            if (f.nbPersonnesRestantes > 0) {
+                remainingByReservationId.putIfAbsent(f.reservationId, f.nbPersonnesRestantes);
+            }
+        }
+
+        for (Map.Entry<Integer, Integer> e : remainingByReservationId.entrySet()) {
+            Integer id = e.getKey();
+            Integer remaining = e.getValue();
+            Reservation r = reservationById.get(id);
+            if (r == null) {
+                continue;
+            }
+            Reservation copy = new Reservation(r.getId(), r.getDateReservation(), r.getHeureReservation(), remaining, r.getIdClient(), r.getIdHotel());
+            copy.setHotel(r.getHotel());
+            copy.setClient(r.getClient());
+            out.add(copy);
+        }
+        return out;
     }
 }
