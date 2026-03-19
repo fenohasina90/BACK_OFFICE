@@ -78,16 +78,6 @@ CREATE TABLE parametre (
     temps_attente_min int NOT NULL CHECK (temps_attente_min >= 0)
 );
 
--- Table reservation_planification
-CREATE TABLE reservation_planification (
-    id serial PRIMARY KEY,
-    id_reservation int NOT NULL UNIQUE,
-    id_voiture int NOT NULL,
-    date_planification timestamp NOT NULL DEFAULT now(),
-    FOREIGN KEY (id_reservation) REFERENCES reservation(id) ON DELETE CASCADE,
-    FOREIGN KEY (id_voiture) REFERENCES voiture(id)
-);
-
 CREATE TABLE voyage (
     id serial PRIMARY KEY,
     date_voyage date NOT NULL,
@@ -96,6 +86,19 @@ CREATE TABLE voyage (
     duree_minutes int NOT NULL CHECK (duree_minutes >= 0),
     date_creation timestamp NOT NULL DEFAULT now(),
     FOREIGN KEY (id_voiture) REFERENCES voiture(id)
+);
+
+-- Table reservation_planification
+CREATE TABLE reservation_planification (
+    id serial PRIMARY KEY,
+    id_reservation int NOT NULL,
+    id_voiture int NOT NULL,
+    id_voyage int,
+    nb_personnes_affectees int NOT NULL CHECK (nb_personnes_affectees > 0),
+    date_planification timestamp NOT NULL DEFAULT now(),
+    FOREIGN KEY (id_reservation) REFERENCES reservation(id) ON DELETE CASCADE,
+    FOREIGN KEY (id_voiture) REFERENCES voiture(id),
+    FOREIGN KEY (id_voyage) REFERENCES voyage(id) ON DELETE CASCADE
 );
 
 CREATE TABLE voyage_stop (
@@ -115,11 +118,11 @@ CREATE TABLE voyage_stop (
 
 -- Clients
 INSERT INTO client (id, nom, prenom, email) VALUES
-('C006', 'Kot', 'Jean', 'jean.dupont@email.com'),
-('C007', 'Justine', 'Marie', 'marie.martin@email.com'),
-('C008', 'Balita', 'Pierre', 'pierre.bernard@email.com'),
-('C009', 'Randria', 'Sophie', 'sophie.durand@email.com'),
-('C010', 'Bema', 'Thomas', 'thomas.lefebvre@email.com');
+('C001', 'Kot', 'Jean', 'jean.dupont@email.com'),
+('C002', 'Justine', 'Marie', 'marie.martin@email.com'),
+('C003', 'Balita', 'Pierre', 'pierre.bernard@email.com'),
+('C004', 'Randria', 'Sophie', 'sophie.durand@email.com'),
+('C005', 'Bema', 'Thomas', 'thomas.lefebvre@email.com');
 
 -- Tokens de test
 INSERT INTO token (reference, date_expiration) VALUES
