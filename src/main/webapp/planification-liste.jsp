@@ -2,8 +2,8 @@
 <%@ page import="java.util.List" %>
 <%@ page import="java.util.Map" %>
 <%@ page import="java.util.HashMap" %>
-<%@ page import="java.sql.Date" %>
 <%@ page import="java.sql.Time" %>
+<%@ page import="java.sql.Date" %>
 <%@ page import="java.sql.Timestamp" %>
 <!DOCTYPE html>
 <html>
@@ -69,85 +69,66 @@
                         <h2>Résultats</h2>
                     </div>
                     <div class="card-body">
-                        <% if (rows != null && !rows.isEmpty()) { %>
-                            <% 
-                                Map<Integer, Integer> voyageCounts = new HashMap<>();
-                                for (Map<String, Object> r : rows) {
-                                    Integer vid = (Integer) r.get("voyageId");
-                                    if (vid != null) {
-                                        Integer c = voyageCounts.get(vid);
-                                        voyageCounts.put(vid, c == null ? 1 : (c + 1));
-                                    }
-                                }
-                            %>
+                        <% 
+                            List<Map<String, Object>> creneauRows = (List<Map<String, Object>>) request.getAttribute("creneauRows");
+                        %>
+
+                        <% if (creneauRows != null && !creneauRows.isEmpty()) { %>
                             <div class="table-container">
                                 <table class="data-table">
                                     <thead>
                                         <tr>
-                                            <th>Réservation</th>
-                                            <th>Date</th>
-                                            <th>Heure</th>
-                                            <th>Client</th>
-                                            <th>Hôtel</th>
-                                            <th>Personnes</th>
-                                            <th>Voyage</th>
-                                            <th>Groupé</th>
                                             <th>Voiture</th>
+                                            <th>Capacité</th>
                                             <th>Carburant</th>
-                                            <th>Places</th>
-                                            <th>Planifiée le</th>
+                                            <th>Planification</th>
+                                            <th>Hôtel</th>
+                                            <th>Réservation</th>
+                                            <th>Créneau</th>
+                                            <th>Heure départ</th>
+                                            <th>Durée (min)</th>
+                                            <th>Heure arrivée aéroport</th>
+                                            <th>Non assigné</th>
+                                            <th>Détails</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        <% for (Map<String, Object> r : rows) { 
-                                            Integer reservationId = (Integer) r.get("reservationId");
-                                            Date dateReservation = (Date) r.get("dateReservation");
-                                            Time heureReservation = (Time) r.get("heureReservation");
-                                            String idClient = (String) r.get("idClient");
-                                            String hotelNom = (String) r.get("hotelNom");
-                                            Integer nbPersonnes = (Integer) r.get("nbPersonnes");
-                                            Integer voyageId = (Integer) r.get("voyageId");
-                                            Integer voyageCount = voyageId != null ? voyageCounts.get(voyageId) : null;
+                                        <% for (Map<String, Object> r : creneauRows) {
                                             Integer voitureId = (Integer) r.get("voitureId");
-                                            String typeCarburant = (String) r.get("typeCarburant");
-                                            Integer nbPlace = (Integer) r.get("nbPlace");
-                                            Timestamp datePlanification = (Timestamp) r.get("datePlanification");
-
-                                            String badgeClass = "badge-info";
-                                            if (typeCarburant != null) {
-                                                if ("D".equalsIgnoreCase(typeCarburant)) badgeClass = "badge-diesel";
-                                                else if ("H".equalsIgnoreCase(typeCarburant)) badgeClass = "badge-hybride";
-                                                else if ("El".equalsIgnoreCase(typeCarburant)) badgeClass = "badge-electrique";
-                                                else if ("E".equalsIgnoreCase(typeCarburant)) badgeClass = "badge-essence";
-                                            }
+                                            Object nbPlace = r.get("nbPlace");
+                                            Object typeCarburant = r.get("typeCarburant");
+                                            Object planificationLabel = r.get("planificationLabel");
+                                            Object hotelsLabel = r.get("hotelsLabel");
+                                            Object reservationsLabel = r.get("reservationsLabel");
+                                            Object creneau = r.get("creneau");
+                                            Object heureDepart = r.get("heureDepart");
+                                            Object dureeMinutes = r.get("dureeMinutes");
+                                            Object heureRetour = r.get("heureRetour");
+                                            Object nonAssignesLabel = r.get("nonAssignesLabel");
+                                            Integer voyageId = (Integer) r.get("voyageId");
                                         %>
                                             <tr>
-                                                <td><strong>#<%= reservationId %></strong></td>
-                                                <td><%= dateReservation != null ? dateReservation.toString() : "" %></td>
-                                                <td><%= heureReservation != null ? heureReservation.toString().substring(0,5) : "" %></td>
-                                                <td><%= idClient %></td>
-                                                <td><%= hotelNom %></td>
-                                                <td><%= nbPersonnes %></td>
+                                                <td>
+                                                    <%= voitureId != null ? ("#" + voitureId) : "" %>
+                                                </td>
+                                                <td><%= nbPlace != null ? nbPlace.toString() : "" %></td>
+                                                <td><%= typeCarburant != null ? typeCarburant.toString() : "" %></td>
+                                                <td><%= planificationLabel != null ? planificationLabel.toString() : "" %></td>
+                                                <td><%= hotelsLabel != null ? hotelsLabel.toString() : "" %></td>
+                                                <td><%= reservationsLabel != null ? reservationsLabel.toString() : "" %></td>
+                                                <td><%= creneau != null ? creneau.toString() : "" %></td>
+                                                <td><%= heureDepart != null ? heureDepart.toString() : "" %></td>
+                                                <td><%= dureeMinutes != null ? dureeMinutes.toString() : "" %></td>
+                                                <td><%= heureRetour != null ? heureRetour.toString() : "" %></td>
+                                                <td><%= nonAssignesLabel != null ? nonAssignesLabel.toString() : "" %></td>
                                                 <td>
                                                     <% if (voyageId != null) { %>
-                                                        <a href="<%= request.getContextPath() %>/planification/voyage?id=<%= voyageId %>"><strong>#<%= voyageId %></strong></a>
-                                                    <% } else { %>
-                                                        -
+                                                        <a class="btn btn-sm btn-secondary" href="<%= request.getContextPath() %>/planification/voyage?id=<%= voyageId %>">Voyage</a>
+                                                    <% } %>
+                                                    <% if (voitureId != null) { %>
+                                                        <a class="btn btn-sm btn-secondary" href="<%= request.getContextPath() %>/voiture/edit/<%= voitureId %>">Voiture</a>
                                                     <% } %>
                                                 </td>
-                                                <td>
-                                                    <% if (voyageId != null && voyageCount != null && voyageCount > 1) { %>
-                                                        <span class="badge badge-info">Oui (<%= voyageCount %>)</span>
-                                                    <% } else if (voyageId != null) { %>
-                                                        <span class="badge badge-info">Non</span>
-                                                    <% } else { %>
-                                                        -
-                                                    <% } %>
-                                                </td>
-                                                <td>#<%= voitureId %></td>
-                                                <td><span class="badge <%= badgeClass %>"><%= typeCarburant != null ? typeCarburant : "" %></span></td>
-                                                <td><%= nbPlace %></td>
-                                                <td><%= datePlanification != null ? datePlanification.toString() : "" %></td>
                                             </tr>
                                         <% } %>
                                     </tbody>

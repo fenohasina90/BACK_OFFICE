@@ -1,8 +1,10 @@
 <%@ page contentType="text/html;charset=UTF-8" language="java" %>
 <%@ page import="java.util.List" %>
 <%@ page import="java.util.Map" %>
-<%@ page import="java.time.LocalTime" %>
+<%@ page import="java.time.LocalDateTime" %>
 <%@ page import="main.java.com.entity.VoyageStop" %>
+<%@ page import="main.java.com.entity.Voyage" %>
+<%@ page import="main.java.com.service.PlanificationService.VoyageLeg" %>
 <!DOCTYPE html>
 <html>
 <head>
@@ -25,9 +27,13 @@
                 String error = (String) request.getAttribute("error");
                 Object voyageIdObj = request.getAttribute("voyageId");
                 Object distanceTotalKmObj = request.getAttribute("distanceTotalKm");
+                Voyage voyage = (Voyage) request.getAttribute("voyage");
+                Object nbVoyagesVoitureDateObj = request.getAttribute("nbVoyagesVoitureDate");
+                LocalDateTime departAeroport = (LocalDateTime) request.getAttribute("departAeroport");
                 List<VoyageStop> stops = (List<VoyageStop>) request.getAttribute("stops");
-                Map<Integer, LocalTime> arrivalByStopId = (Map<Integer, LocalTime>) request.getAttribute("arrivalByStopId");
-                LocalTime arrivalAeroport = (LocalTime) request.getAttribute("arrivalAeroport");
+                Map<Integer, LocalDateTime> arrivalByStopIdDT = (Map<Integer, LocalDateTime>) request.getAttribute("arrivalByStopIdDT");
+                LocalDateTime retourAeroport = (LocalDateTime) request.getAttribute("retourAeroport");
+                List<VoyageLeg> legs = (List<VoyageLeg>) request.getAttribute("legs");
             %>
 
             <% if (error != null) { %>
@@ -49,9 +55,48 @@
                         Distance totale: <strong><%= distanceTotalKmObj != null ? distanceTotalKmObj.toString() : "0" %> km</strong>
                     </p>
                     <p style="margin-bottom: 1rem;">
-                        Arrivée à l'aéroport: <strong><%= arrivalAeroport != null ? arrivalAeroport.toString() : "" %></strong>
+                        Nombre de voyages effectués (voiture/date): <strong><%= nbVoyagesVoitureDateObj != null ? nbVoyagesVoitureDateObj.toString() : "0" %></strong>
                     </p>
+                    <p style="margin-bottom: 1rem;">
+                        Départ aéroport: <strong><%= departAeroport != null ? departAeroport.toString() : "" %></strong>
+                    </p>
+                    <p style="margin-bottom: 1rem;">
+                        Durée du voyage: <strong><%= voyage != null ? voyage.getDureeMinutes() : 0 %> min</strong>
+                    </p>
+                    <p style="margin-bottom: 1rem;">
+                        Retour à l'aéroport: <strong><%= retourAeroport != null ? retourAeroport.toString() : "" %></strong>
+                    </p>
+
+                    <% if (legs != null && !legs.isEmpty()) { %>
+                        <h3 style="margin: 1rem 0;">Trajets</h3>
+                        <div class="table-container">
+                            <table class="data-table">
+                                <thead>
+                                <tr>
+                                    <th>De</th>
+                                    <th>Vers</th>
+                                    <th>Distance (km)</th>
+                                    <th>Départ</th>
+                                    <th>Arrivée</th>
+                                </tr>
+                                </thead>
+                                <tbody>
+                                <% for (VoyageLeg l : legs) { %>
+                                    <tr>
+                                        <td><%= l.getFromLabel() %></td>
+                                        <td><%= l.getToLabel() %></td>
+                                        <td><%= l.getDistanceKm() %></td>
+                                        <td><%= l.getDepart() != null ? l.getDepart().toString() : "" %></td>
+                                        <td><%= l.getArrive() != null ? l.getArrive().toString() : "" %></td>
+                                    </tr>
+                                <% } %>
+                                </tbody>
+                            </table>
+                        </div>
+                    <% } %>
+
                     <% if (stops != null && !stops.isEmpty()) { %>
+                        <h3 style="margin: 1rem 0;">Stops</h3>
                         <div class="table-container">
                             <table class="data-table">
                                 <thead>
@@ -60,7 +105,7 @@
                                     <th>Réservation</th>
                                     <th>Lieu destination</th>
                                     <th>Distance (km)</th>
-                                    <th>Heure d'arrivée</th>
+                                    <th>Date/Heure d'arrivée</th>
                                 </tr>
                                 </thead>
                                 <tbody>
@@ -70,7 +115,7 @@
                                         <td>#<%= s.getIdReservation() %></td>
                                         <td><%= s.getLieuLabel() != null ? s.getLieuLabel() : ("#" + s.getIdLieuDestination()) %></td>
                                         <td><%= s.getDistanceKm() %></td>
-                                        <td><%= (arrivalByStopId != null && arrivalByStopId.get(s.getId()) != null) ? arrivalByStopId.get(s.getId()).toString() : "" %></td>
+                                        <td><%= (arrivalByStopIdDT != null && arrivalByStopIdDT.get(s.getId()) != null) ? arrivalByStopIdDT.get(s.getId()).toString() : "" %></td>
                                     </tr>
                                 <% } %>
                                 </tbody>
